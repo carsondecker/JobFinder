@@ -2,10 +2,10 @@ module github.com/carsondecker/JobFinder
 
 go 1.23.4
 
-require github.com/lib/pq v1.10.9
-
 require (
-	github.com/google/uuid v1.6.0 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/pressly/goose/v3 v3.24.1 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/google/uuid v1.6.0
+	github.com/joho/godotenv v1.5.1
+	github.com/lib/pq v1.10.9
+	golang.org/x/crypto v0.36.0
 )
