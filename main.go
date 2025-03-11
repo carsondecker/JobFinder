@@ -38,6 +38,15 @@ type Job struct {
 	UserID      uuid.UUID `json:"user_id"`
 }
 
+type Application struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	CoverNote string    `json:"cover_note"`
+	JobID     uuid.UUID `json:"job_id"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
 func main() {
 	godotenv.Load()
 	dbUrl := os.Getenv("DB_URL")
@@ -69,6 +78,9 @@ func main() {
 	mux.HandleFunc("GET /api/jobs", cfg.getJobsHandler)
 	mux.HandleFunc("GET /api/jobs/{jobID}", cfg.getJobByIDHandler)
 	mux.HandleFunc("DELETE /api/jobs/{jobID}", cfg.deleteJobHandler)
+	mux.HandleFunc("POST /api/jobs/{jobID}/apply", cfg.applyHandler)
+	mux.HandleFunc("GET /api/application", cfg.getApplicationByUserHandler)
+	mux.HandleFunc("GET /api/jobs/{jobID}/applications", cfg.getApplicationsByJobHandler)
 
 	server.ListenAndServe()
 }
@@ -270,6 +282,10 @@ func (cfg *config) getJobsByTitleHandler(w http.ResponseWriter, r *http.Request)
 
 func (cfg *config) deleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	jobID, err := uuid.Parse(r.PathValue("jobID"))
+	if err != nil {
+		respondWithError(w, 400, "could not parse job id")
+		return
+	}
 
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
@@ -300,6 +316,129 @@ func (cfg *config) deleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(200)
+}
+
+func (cfg *config) applyHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("jobID"))
+	if err != nil {
+		respondWithError(w, 400, "could not parse job id")
+		return
+	}
+
+	type parameters struct {
+		CoverNote string `json:"cover_note"`
+	}
+
+	params := parameters{}
+
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+	if err := decoder.Decode(&params); err != nil {
+		respondWithError(w, 500, "Failed to decode json")
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "invalid token")
+		return
+	}
+
+	job, err := cfg.db.GetJobByID(r.Context(), jobID)
+	if err != nil {
+		respondWithError(w, 400, "could not get job")
+		return
+	}
+
+	if userID == job.UserID {
+		respondWithError(w, 400, "cannot apply to own job")
+		return
+	}
+
+	application, err := cfg.db.CreateApplication(r.Context(), database.CreateApplicationParams{
+		CoverNote: params.CoverNote,
+		JobID:     job.ID,
+		UserID:    userID,
+	})
+
+	respondWithJSON(w, 201, Application(application))
+}
+
+func (cfg *config) getApplicationByUserHandler(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+
+	id, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "invalid token")
+		return
+	}
+
+	applications, err := cfg.db.GetApplicationsByUserID(r.Context(), id)
+	if err != nil {
+		respondWithError(w, 500, "could not get applications")
+		return
+	}
+
+	convertedApps := make([]Application, len(applications))
+	for i, app := range applications {
+		convertedApps[i] = Application(app)
+	}
+
+	respondWithJSON(w, 200, convertedApps)
+}
+
+func (cfg *config) getApplicationsByJobHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("jobID"))
+	if err != nil {
+		respondWithError(w, 400, "could not parse job id")
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "invalid token")
+		return
+	}
+
+	job, err := cfg.db.GetJobByID(r.Context(), jobID)
+	if err != nil {
+		respondWithError(w, 400, "could not get job")
+		return
+	}
+
+	if userID != job.UserID {
+		w.WriteHeader(401)
+		return
+	}
+
+	applications, err := cfg.db.GetApplicationsByJobID(r.Context(), jobID)
+	if err != nil {
+		respondWithError(w, 500, "could not get applications")
+		return
+	}
+
+	convertedApps := make([]Application, len(applications))
+	for i, app := range applications {
+		convertedApps[i] = Application(app)
+	}
+
+	respondWithJSON(w, 200, convertedApps)
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
