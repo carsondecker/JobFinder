@@ -18,7 +18,7 @@ goose -dir ./sql/schema postgres "user=postgres dbname=projectdb sslmode=disable
 #### Configure .env file
 The .env file should look something like this:
 ```
-DB_URL="{database connection string}"
+DB_URL="{database connection string for postgres, looks like "postgres://postgres:postgres@localhost:5432/jobfinder"}"
 PLATFORM="dev" (or anything else for production)
 SECRET="{random JWT secret, just generate a random string here}"
 ```
