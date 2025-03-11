@@ -10,6 +10,16 @@ import (
 	"github.com/google/uuid"
 )
 
+type Job struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Title       string
+	Description string
+	City        string
+	UserID      uuid.UUID
+}
+
 type User struct {
 	ID           uuid.UUID
 	CreatedAt    time.Time

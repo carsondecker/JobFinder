@@ -28,6 +28,16 @@ type User struct {
 	Username  string    `json:"username"`
 }
 
+type Job struct {
+	ID          uuid.UUID `json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	City        string    `json:"city"`
+	UserID      uuid.UUID `json:"user_id"`
+}
+
 func main() {
 	godotenv.Load()
 	dbUrl := os.Getenv("DB_URL")
@@ -55,6 +65,10 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", cfg.resetHandler)
 	mux.HandleFunc("POST /api/auth/register", cfg.registerHandler)
 	mux.HandleFunc("POST /api/auth/login", cfg.loginHandler)
+	mux.HandleFunc("POST /api/jobs", cfg.createJobHandler)
+	mux.HandleFunc("GET /api/jobs", cfg.getJobsHandler)
+	mux.HandleFunc("GET /api/jobs/{jobID}", cfg.getJobByIDHandler)
+	mux.HandleFunc("DELETE /api/jobs/{jobID}", cfg.deleteJobHandler)
 
 	server.ListenAndServe()
 }
@@ -120,19 +134,13 @@ func (cfg *config) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	passwordHash, err := auth.HashPassword(params.Password)
-	if err != nil {
-		respondWithError(w, 500, "could not hash password")
-		return
-	}
-
 	hashedPassword, err := cfg.db.GetPasswordHashByUsername(r.Context(), params.Username)
 	if err != nil {
 		respondWithError(w, 500, "could not fetch user's password")
 		return
 	}
 
-	if err := auth.CheckPasswordHash(passwordHash, hashedPassword); err != nil {
+	if err := auth.CheckPasswordHash(params.Password, hashedPassword); err != nil {
 		w.WriteHeader(401)
 		return
 	}
@@ -163,6 +171,135 @@ func (cfg *config) loginHandler(w http.ResponseWriter, r *http.Request) {
 		Username:  user.Username,
 		Token:     token,
 	})
+}
+
+func (cfg *config) createJobHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		City        string `json:"city"`
+	}
+
+	params := parameters{}
+
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+	if err := decoder.Decode(&params); err != nil {
+		respondWithError(w, 500, "Failed to decode json")
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+
+	id, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "invalid token")
+		return
+	}
+
+	job, err := cfg.db.CreateJob(r.Context(), database.CreateJobParams{
+		Title:       params.Title,
+		Description: params.Description,
+		City:        params.City,
+		UserID:      id,
+	})
+	if err != nil {
+		respondWithError(w, 500, "could not create job")
+		return
+	}
+
+	respondWithJSON(w, 201, Job(job))
+}
+
+func (cfg *config) getJobsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("title") != "" {
+		cfg.getJobsByTitleHandler(w, r)
+		return
+	}
+
+	jobs, err := cfg.db.GetJobs(r.Context())
+	if err != nil {
+		respondWithError(w, 500, "could not get jobs")
+		return
+	}
+
+	convertedJobs := make([]Job, len(jobs))
+	for i, job := range jobs {
+		convertedJobs[i] = Job(job)
+	}
+
+	respondWithJSON(w, 200, convertedJobs)
+}
+
+func (cfg *config) getJobByIDHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("jobID"))
+	if err != nil {
+		respondWithError(w, 400, "could not get job id from url")
+		return
+	}
+
+	job, err := cfg.db.GetJobByID(r.Context(), jobID)
+	if err != nil {
+		respondWithError(w, 400, "could not get job")
+		return
+	}
+
+	respondWithJSON(w, 200, Job(job))
+}
+
+func (cfg *config) getJobsByTitleHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Query().Get("title")
+
+	jobs, err := cfg.db.GetJobsByTitle(r.Context(), title)
+	if err != nil {
+		respondWithError(w, 500, "could not get jobs")
+		return
+	}
+
+	convertedJobs := make([]Job, len(jobs))
+	for i, job := range jobs {
+		convertedJobs[i] = Job(job)
+	}
+
+	respondWithJSON(w, 200, convertedJobs)
+}
+
+func (cfg *config) deleteJobHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("jobID"))
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+
+	id, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "invalid token")
+		return
+	}
+
+	job, err := cfg.db.GetJobByID(r.Context(), jobID)
+	if err != nil {
+		respondWithError(w, 400, "could not get job")
+		return
+	}
+
+	if id != job.UserID {
+		w.WriteHeader(401)
+		return
+	}
+
+	if err = cfg.db.DeleteJob(r.Context(), jobID); err != nil {
+		respondWithError(w, 500, "could not delete job")
+		return
+	}
+
+	w.WriteHeader(200)
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
