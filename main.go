@@ -366,6 +366,10 @@ func (cfg *config) applyHandler(w http.ResponseWriter, r *http.Request) {
 		JobID:     job.ID,
 		UserID:    userID,
 	})
+	if err != nil {
+		respondWithError(w, 500, "could not create application")
+		return
+	}
 
 	respondWithJSON(w, 201, Application(application))
 }
