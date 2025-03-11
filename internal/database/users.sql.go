@@ -12,6 +12,80 @@ import (
 	"github.com/google/uuid"
 )
 
+const createUser = `-- name: CreateUser :one
+INSERT INTO users(id, created_at, updated_at, username, password_hash)
+VALUES (
+    gen_random_uuid(),
+    NOW(),
+    NOW(),
+    $1,
+    $2
+)
+RETURNING id, created_at, updated_at, username
+`
+
+type CreateUserParams struct {
+	Username     string
+	PasswordHash string
+}
+
+type CreateUserRow struct {
+	ID        uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Username  string
+}
+
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
+	row := q.db.QueryRowContext(ctx, createUser, arg.Username, arg.PasswordHash)
+	var i CreateUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Username,
+	)
+	return i, err
+}
+
+const getPasswordHashByUsername = `-- name: GetPasswordHashByUsername :one
+SELECT password_hash
+FROM users
+WHERE username = $1
+`
+
+func (q *Queries) GetPasswordHashByUsername(ctx context.Context, username string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getPasswordHashByUsername, username)
+	var password_hash string
+	err := row.Scan(&password_hash)
+	return password_hash, err
+}
+
+const getUserByUsername = `-- name: GetUserByUsername :one
+SELECT id, created_at, updated_at, username
+FROM users
+WHERE username = $1
+`
+
+type GetUserByUsernameRow struct {
+	ID        uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Username  string
+}
+
+func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
+	var i GetUserByUsernameRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Username,
+	)
+	return i, err
+}
+
 const getUsers = `-- name: GetUsers :many
 SELECT id, created_at, updated_at, username
 FROM users
@@ -50,4 +124,13 @@ func (q *Queries) GetUsers(ctx context.Context) ([]GetUsersRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetUsers = `-- name: ResetUsers :exec
+DELETE FROM users
+`
+
+func (q *Queries) ResetUsers(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, resetUsers)
+	return err
 }
